@@ -1,0 +1,9 @@
+/* stylelint-disable at-rule-no-unknown */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* تخصيص بسيط */
+body {
+  @apply bg-gray-100 text-gray-800;
+}
