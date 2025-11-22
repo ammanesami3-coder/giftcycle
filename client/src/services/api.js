@@ -52,3 +52,17 @@ export const registerUser = async (data) => {
 
 export const loginUser = (data) => api.post("/auth/login", data);
 
+export const deleteGift = async (giftId) => {
+  try {
+    const res = await api.delete(`/gifts/${giftId}`);
+    return res.data;
+  } catch (err) {
+    console.error("Error deleting gift:", err);
+    throw err;
+  }
+};
+
+export const getSimilarGifts = async (id) => {
+  const res = await api.get(`/gifts/similar/${id}`);
+  return res.data;
+};

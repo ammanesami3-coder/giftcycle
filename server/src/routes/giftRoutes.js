@@ -63,4 +63,77 @@ router.get("/:id", async (req, res) => {
   }
 });
 
+// حذف هدية
+router.delete("/:id", async (req, res) => {
+  try {
+    const giftId = req.params.id;
+
+    // تحقق من الهدية
+    const gift = await pool.query(
+      "SELECT * FROM gifts WHERE id = $1",
+      [giftId]
+    );
+
+    if (gift.rows.length === 0) {
+      return res.status(404).json({ error: "Gift not found" });
+    }
+
+    // منع حذف الهدايا المغلقة
+    if (gift.rows[0].gift_status === "locked") {
+      return res.status(400).json({
+        error: "You cannot delete a locked gift."
+      });
+    }
+
+    // تنفيذ الحذف
+    await pool.query(
+      "DELETE FROM gifts WHERE id = $1",
+      [giftId]
+    );
+
+    res.json({ success: true, message: "Gift deleted successfully" });
+
+  } catch (err) {
+    console.error("DELETE /gifts/:id ERROR:", err.message);
+    res.status(500).json({ error: "Server error while deleting gift" });
+  }
+});
+
+// جلب هدايا مشابهة
+router.get("/similar/:id", async (req, res) => {
+  try {
+    const giftId = req.params.id;
+
+    // جلب الهدية الأصلية
+    const base = await pool.query(
+      "SELECT category, price FROM gifts WHERE id = $1",
+      [giftId]
+    );
+
+    if (base.rows.length === 0) {
+      return res.status(404).json({ error: "Gift not found" });
+    }
+
+    const category = base.rows[0].category;
+    const price = base.rows[0].price;
+
+    // جلب هدايا مشابهة (نفس التصنيف + سعر قريب ±30%)
+    const similar = await pool.query(
+      `SELECT *
+       FROM gifts
+       WHERE id != $1
+       AND category = $2
+       AND price BETWEEN $3 AND $4
+       ORDER BY RANDOM()
+       LIMIT 6`,
+      [giftId, category, price * 0.7, price * 1.3]
+    );
+
+    res.json(similar.rows);
+
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;
