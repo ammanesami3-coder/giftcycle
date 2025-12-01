@@ -1,0 +1,57 @@
+import { createContext, useContext, useState, useEffect } from "react";
+import api from "../services/api";
+
+const UserContext = createContext();
+
+export const UserProvider = ({ children }) => {
+  const [user, setUser] = useState(null);
+  const [loadingUser, setLoadingUser] = useState(true);
+
+  // ✅ تحميل المستخدم عند فتح الموقع (إذا كان التوكن موجودًا)
+  useEffect(() => {
+    const initializeUser = async () => {
+      try {
+        const token = localStorage.getItem("token");
+        const savedUser = localStorage.getItem("user");
+
+        if (token && savedUser) {
+          const parsedUser = JSON.parse(savedUser);
+
+          // تحقق من أن المستخدم ما زال صالحًا
+          const res = await api.get(`/users/${parsedUser.id}`);
+          if (res.data) {
+            setUser(res.data);
+            localStorage.setItem("user", JSON.stringify(res.data)); // تحديث البيانات
+          } else {
+            logout();
+          }
+        } else {
+          logout();
+        }
+      } catch (err) {
+        console.error("❌ Error verifying user:", err);
+        logout();
+      } finally {
+        setLoadingUser(false);
+      }
+    };
+
+    initializeUser();
+  }, []);
+
+  // ✅ تسجيل الخروج
+  const logout = () => {
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
+    setUser(null);
+  };
+
+  return (
+    <UserContext.Provider value={{ user, setUser, logout, loadingUser }}>
+      {children}
+    </UserContext.Provider>
+  );
+};
+
+// ✅ هوك مخصص لاستخدام السياق بسهولة
+export const useUser = () => useContext(UserContext);

@@ -1,0 +1,21 @@
+/* stylelint-disable at-rule-no-unknown */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* تخصيص بسيط */
+body {
+  @apply bg-gray-100 text-gray-800;
+}
+
+:root {
+  --toast-bg: #ffffff;
+  --toast-text: #1f2937;
+  --toast-border: #e5e7eb;
+}
+
+.dark {
+  --toast-bg: #1f2937;
+  --toast-text: #f9fafb;
+  --toast-border: #374151;
+}
