@@ -42,6 +42,14 @@ if (!shippoToken) {
 }
 
 // ============================
+// Platform fee on shipping
+// ============================
+
+// عمولة ثابتة بالدولار تضاف على سعر Shippo لكل شحنة في نموذج التبادل
+// يمكنك تعديلها لاحقًا بسهولة (مثلاً 1.0 أو 2.0 حسب ما تريد).
+const PLATFORM_FEE_USD = 1.5;
+
+// ============================
 // Helpers
 // ============================
 
@@ -131,7 +139,7 @@ async function createShippoShipment({ fromAddress, toAddress, weightKg }) {
     async: false,
   });
 
-  if (!shipment || !shipment.rates || shipment.rates.length === 0) {
+  if (!shipment || shipment.rates || shipment.rates.length === 0) {
     throw new Error("No rates returned from Shippo for this shipment.");
   }
 
@@ -701,6 +709,7 @@ router.post("/confirm", async (req, res) => {
     return res.status(500).json({ error: "Failed to confirm payment." });
   }
 });
+
 // 4-A) Get shipping quote (user-based, فردي)
 // POST /api/swap/:offerId/shipping/quote
 // ALIAS: POST /api/swap/:offerId/shipping/rates
@@ -804,11 +813,30 @@ async function handleSwapShippingQuote(req, res) {
       weightKg: weight || 0.5,
     });
 
+    // ============================
+    // تطبيق عمولة المنصة على الشحن
+    // ============================
+    const baseAmount = Number(rate.amount);
+    if (!baseAmount || !isFinite(baseAmount)) {
+      console.error("❌ Invalid Shippo rate amount:", rate.amount);
+      return res.status(500).json({
+        error: "Invalid shipping rate returned from carrier.",
+      });
+    }
+
+    const platformFee = PLATFORM_FEE_USD;
+    const finalAmount = baseAmount + platformFee;
+
     return res.json({
       success: true,
       rate: {
         object_id: rate.object_id,
-        amount: rate.amount,
+        // السعر النهائي الذي سيدفعه المستخدم (يُستخدم في Stripe)
+        amount: finalAmount,
+        // للشفافية والتحليلات أو العرض في الواجهة
+        base_amount: baseAmount,
+        platform_fee: platformFee,
+        final_amount: finalAmount,
         currency: rate.currency,
         provider: rate.provider,
         servicelevel_name: rate.servicelevel?.name || null,
@@ -825,7 +853,6 @@ async function handleSwapShippingQuote(req, res) {
 
 router.post("/:offerId/shipping/quote", handleSwapShippingQuote);
 router.post("/:offerId/shipping/rates", handleSwapShippingQuote);
-
 
 // ===============================================
 // 4-B) Stripe checkout for swap shipping (label فردي)

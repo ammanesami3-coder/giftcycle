@@ -7,7 +7,14 @@ export const UserProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loadingUser, setLoadingUser] = useState(true);
 
-  // ✅ تحميل المستخدم عند فتح الموقع (إذا كان التوكن موجودًا)
+  // تسجيل الخروج
+  const logout = () => {
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
+    setUser(null);
+  };
+
+  // تحميل المستخدم عند فتح الموقع (إذا كان التوكن موجودًا)
   useEffect(() => {
     const initializeUser = async () => {
       try {
@@ -17,7 +24,7 @@ export const UserProvider = ({ children }) => {
         if (token && savedUser) {
           const parsedUser = JSON.parse(savedUser);
 
-          // تحقق من أن المستخدم ما زال صالحًا
+          // التحقق من أن المستخدم ما زال موجودًا وصالحًا
           const res = await api.get(`/users/${parsedUser.id}`);
           if (res.data) {
             setUser(res.data);
@@ -26,7 +33,8 @@ export const UserProvider = ({ children }) => {
             logout();
           }
         } else {
-          logout();
+          // لا يوجد توكن => نكتفي بجعل user = null
+          setUser(null);
         }
       } catch (err) {
         console.error("❌ Error verifying user:", err);
@@ -39,13 +47,6 @@ export const UserProvider = ({ children }) => {
     initializeUser();
   }, []);
 
-  // ✅ تسجيل الخروج
-  const logout = () => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
-    setUser(null);
-  };
-
   return (
     <UserContext.Provider value={{ user, setUser, logout, loadingUser }}>
       {children}
@@ -53,5 +54,4 @@ export const UserProvider = ({ children }) => {
   );
 };
 
-// ✅ هوك مخصص لاستخدام السياق بسهولة
 export const useUser = () => useContext(UserContext);

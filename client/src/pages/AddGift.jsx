@@ -11,6 +11,7 @@ const AddGift = () => {
     price: "",
     category: "",
     image_url: "",
+    parcel_weight_kg: "", // 👈 وزن الطرد بالكيلو
   });
 
   const [loading, setLoading] = useState(false);
@@ -63,7 +64,16 @@ const AddGift = () => {
         return;
       }
 
-      await api.post("/gifts", { ...form, owner_id: user.id });
+      // 👈 نرسل الوزن كرقم parcel_weight_kg
+      await api.post("/gifts", {
+        title: form.title,
+        description: form.description,
+        price: form.price,
+        category: form.category,
+        image_url: form.image_url,
+        parcel_weight_kg: Number(form.parcel_weight_kg),
+        owner_id: user.id,
+      });
 
       alert("🎁 Gift added successfully!");
       setForm({
@@ -72,6 +82,7 @@ const AddGift = () => {
         price: "",
         category: "",
         image_url: "",
+        parcel_weight_kg: "",
       });
     } catch (err) {
       alert("❌ Error adding gift.");
@@ -117,6 +128,27 @@ const AddGift = () => {
             required
             className="w-full p-3 border border-gray-300 dark:border-gray-700 rounded-lg dark:bg-gray-700 dark:text-white"
           />
+
+          {/* 👇 حقل وزن الطرد بالكيلوغرام */}
+          <div>
+            <label className="block mb-1 text-gray-600 dark:text-gray-300 text-sm">
+              Parcel weight (kg)
+            </label>
+            <input
+              type="number"
+              name="parcel_weight_kg"
+              step="0.1"
+              min="0.1"
+              placeholder="e.g. 0.5"
+              value={form.parcel_weight_kg}
+              onChange={handleChange}
+              required
+              className="w-full p-3 border border-gray-300 dark:border-gray-700 rounded-lg dark:bg-gray-700 dark:text-white"
+            />
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              Approximate weight of the packaged gift in kilograms.
+            </p>
+          </div>
 
           <input
             type="text"

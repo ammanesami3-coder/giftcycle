@@ -4,6 +4,7 @@ import { io } from "socket.io-client";
 import api from "../services/api";
 import { useUser } from "../context/UserContext";
 import toast from "react-hot-toast";
+import BuyerAddressForm from "../components/BuyerAddressForm";
 
 /*
   OfferConversation.jsx
@@ -48,6 +49,19 @@ const OfferConversation = () => {
   const [hasMySwapShipment, setHasMySwapShipment] = useState(false);
   const [partnerHasSwapShipment, setPartnerHasSwapShipment] = useState(false);
 
+  // منطق البيع: عناوين المشتري والبائع
+  const [showBuyerAddressModal, setShowBuyerAddressModal] = useState(false);
+  const [showSellerAddressModal, setShowSellerAddressModal] = useState(false);
+
+  // منطق البيع: اختيار أسعار الشحن + التلخيص
+  const [shippingRates, setShippingRates] = useState([]);
+  const [shippingRatesLoading, setShippingRatesLoading] = useState(false);
+  const [showShippingRatesModal, setShowShippingRatesModal] = useState(false);
+  const [saleSummary, setSaleSummary] = useState(null);
+
+  // شحنة البيع (label + tracking)
+  const [saleShipment, setSaleShipment] = useState(null);
+
   const socketRef = useRef(null);
   const messagesEndRef = useRef(null);
   const mountedRef = useRef(true);
@@ -56,8 +70,38 @@ const OfferConversation = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
 
   const isSaleOffer = offer?.offer_type === "buy";
-  const isBuyer = offer && user && user.id === offer.sender_id; // المرسل هو المشتري
+
+  const isBuyer = offer && user && user.id === offer.sender_id;
   const isSeller = offer && user && user.id === offer.owner_id;
+
+  // من يستطيع تعديل عنوانه في صفحة المحادثة؟
+  const canEditBuyerAddress =
+    isSaleOffer &&
+    isBuyer &&
+    [
+      "awaiting_shipping_selection",
+      "awaiting_buyer_payment",
+      "buyer_paid",
+      "shipped",
+      "sale_completed",
+    ].includes(saleStatus);
+
+  const canEditSellerAddress =
+    isSaleOffer &&
+    isSeller &&
+    [
+      "awaiting_shipping_selection",
+      "awaiting_buyer_payment",
+      "buyer_paid",
+      "shipped",
+      "sale_completed",
+    ].includes(saleStatus);
+
+  // قيم مشتقة لعرض تفاصيل عمولة الشحن للتبادل
+  const shippingBaseAmount = shippingQuote?.rate?.base_amount ?? null;
+  const shippingPlatformFee = shippingQuote?.rate?.platform_fee ?? null;
+  const shippingFinalAmount =
+    shippingQuote?.rate?.final_amount ?? shippingQuote?.rate?.amount ?? null;
 
   // تحميل الرسائل
   const loadMessages = async () => {
@@ -160,7 +204,7 @@ const OfferConversation = () => {
     return () => {
       mountedRef.current = false;
     };
-  }, [id, loadingUser, user]); // re-run when offer id or user changes
+  }, [id, loadingUser, user]);
 
   // Socket.io setup
   useEffect(() => {
@@ -196,7 +240,7 @@ const OfferConversation = () => {
       if (!note || !note.type) return;
 
       switch (note.type) {
-        // من منطق البيع القديم
+        // منطق البيع
         case "sale_shipped":
           setSaleStatus("shipped");
           toast.success(note.message || "Seller marked the gift as shipped.");
@@ -205,9 +249,20 @@ const OfferConversation = () => {
           setSaleStatus("buyer_paid");
           toast.success(note.message || "Payment confirmed.");
           break;
+        case "sale_payment_success_seller":
+          setSaleStatus("buyer_paid");
+          toast.success(
+            note.message || "Buyer has paid. You can now ship the gift."
+          );
+          break;
         case "sale_delivered_confirmed":
           setSaleStatus("sale_completed");
           toast.success(note.message || "Delivery confirmed.");
+          break;
+        case "sale_label_ready":
+          toast.success(
+            note.message || "A shipping label is ready for this sale."
+          );
           break;
 
         // فتح نزاع على عملية بيع
@@ -215,16 +270,12 @@ const OfferConversation = () => {
           setSaleStatus("under_dispute");
           toast.error(note.message || "Sale is now under dispute.");
           break;
-
-        // حل النزاع – تم رد المبلغ للمشتري
         case "sale_dispute_refunded_buyer":
           setSaleStatus("refunded");
           toast.success(
             note.message || "The dispute was resolved and payment refunded."
           );
           break;
-
-        // حل النزاع – تم رفضه بدون Refund
         case "sale_dispute_rejected":
           setSaleStatus("sale_completed");
           toast(note.message || "The sale dispute was closed without refund.");
@@ -276,6 +327,60 @@ const OfferConversation = () => {
       socketRef.current = null;
     };
   }, [user, id]);
+
+  // دالة مساعدة لتأكيد الدفع بعد الرجوع من Stripe
+  const confirmSalePayment = async (sessionId) => {
+    if (!user) return;
+
+    try {
+      setActionLoading(true);
+
+      const res = await api.post(`/sale/${id}/confirm-payment`, {
+        session_id: sessionId,
+        user_id: user.id,
+      });
+
+      if (res.data?.sale_status) {
+        setSaleStatus(res.data.sale_status);
+      }
+
+      toast.success(
+        res.data?.message ||
+          "Payment confirmed. Waiting for the seller to ship your gift."
+      );
+    } catch (err) {
+      console.error("Confirm sale payment error:", err);
+      toast.error(
+        err?.response?.data?.error ||
+          "Payment was processed, but we could not confirm it. Please contact support if this persists."
+      );
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // بعد الرجوع من Stripe، تأكيد الدفع وتحديث الحالة
+  useEffect(() => {
+    if (!user || !isSaleOffer) return;
+    if (!isBuyer) return; // فقط المشتري
+
+    const params = new URLSearchParams(window.location.search);
+    const sessionId = params.get("session_id");
+    const flow = params.get("flow");
+
+    // إذا لم يكن هناك session_id أو لم يكن هذا فلو البيع نتوقف
+    if (!sessionId || flow !== "sale") return;
+
+    (async () => {
+      await confirmSalePayment(sessionId);
+
+      // تنظيف الـ URL من البارامترات حتى لا يُعاد الاستدعاء
+      const url = new URL(window.location.href);
+      url.searchParams.delete("session_id");
+      url.searchParams.delete("flow");
+      window.history.replaceState({}, "", url.toString());
+    })();
+  }, [user, isSaleOffer, isBuyer, id]);
 
   // إرسال رسالة جديدة
   const handleSend = async () => {
@@ -448,8 +553,86 @@ const OfferConversation = () => {
   };
 
   // أفعال البيع
+
+  // فتح مودال أسعار الشحن للمشتري
+  const handleOpenShippingRates = async () => {
+    if (!user) return;
+    if (!isBuyer) {
+      toast.error("Only the buyer can select shipping.");
+      return;
+    }
+
+    try {
+      setShippingRates([]);
+      setSaleSummary(null);
+      setShippingRatesLoading(true);
+      setShowShippingRatesModal(true);
+
+      const res = await api.get(`/sale/${id}/shipping-rates`, {
+        params: { user_id: user.id },
+      });
+
+      if (res.data?.rates?.length) {
+        setShippingRates(res.data.rates);
+        toast.success("Shipping options loaded. Choose one to continue.");
+      } else {
+        toast.error("No shipping rates available for this address.");
+        setShowShippingRatesModal(false);
+      }
+    } catch (err) {
+      console.error("Error loading shipping rates:", err);
+      toast.error(
+        err?.response?.data?.error || "Failed to load shipping rates."
+      );
+      setShowShippingRatesModal(false);
+    } finally {
+      setShippingRatesLoading(false);
+    }
+  };
+
+  // اختيار rate معين
+  const handleSelectShippingRate = async (rate) => {
+    if (!user || !rate) return;
+
+    try {
+      setActionLoading(true);
+      const res = await api.post(`/sale/${id}/select-rate`, {
+        user_id: user.id,
+        rate_id: rate.object_id,
+        amount: rate.amount,
+      });
+
+      if (res.data?.sale_status) {
+        setSaleStatus(res.data.sale_status);
+      }
+      if (res.data?.summary) {
+        setSaleSummary(res.data.summary);
+      }
+
+      toast.success("Shipping option selected. You can now pay for this gift.");
+      setShowShippingRatesModal(false);
+    } catch (err) {
+      console.error("Error selecting shipping rate:", err);
+      toast.error(
+        err?.response?.data?.error || "Failed to select shipping rate."
+      );
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const handlePayForSale = async () => {
     if (!user) return;
+
+    if (saleStatus === "awaiting_shipping_selection") {
+      toast.error("Please choose a shipping option first.");
+      return;
+    }
+    if (saleStatus !== "awaiting_buyer_payment") {
+      toast.error("Sale is not ready for payment yet.");
+      return;
+    }
+
     try {
       setActionLoading(true);
       const res = await api.post(`/sale/${id}/checkout`, { user_id: user.id });
@@ -465,6 +648,45 @@ const OfferConversation = () => {
     }
   };
 
+  // توليد Shipping Label للبائع بعد الدفع (يدويًا بالزر فقط)
+  const handleCreateSaleLabel = async () => {
+    if (!user) return;
+    if (!isSeller) {
+      toast.error("Only the seller can generate a shipping label.");
+      return;
+    }
+
+    if (saleStatus !== "buyer_paid" && saleStatus !== "shipped") {
+      toast.error(
+        "You can generate a shipping label only after the buyer has paid."
+      );
+      return;
+    }
+
+    try {
+      setActionLoading(true);
+      const res = await api.post(`/sale/${id}/create-label`, {
+        user_id: user.id,
+      });
+
+      if (res.data?.shipment) {
+        setSaleShipment(res.data.shipment);
+      }
+
+      toast.success(
+        res.data?.message ||
+          "Shipping label created. Download it and attach it to your package."
+      );
+    } catch (err) {
+      console.error("Create sale label error:", err);
+      toast.error(
+        err?.response?.data?.error || "Failed to create shipping label."
+      );
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const handleMarkShipped = async () => {
     if (!user) return;
     if (!isSeller) {
@@ -473,10 +695,13 @@ const OfferConversation = () => {
     }
     try {
       const tracking = window.prompt(
-        "Enter tracking number (leave empty if none):",
+        "Enter tracking number (leave empty if you want to use the label tracking):",
         ""
       );
-      const carrier = window.prompt("Enter carrier (optional):", "");
+      const carrier = window.prompt(
+        "Enter carrier (optional, leave empty to keep existing):",
+        ""
+      );
       setActionLoading(true);
       const res = await api.post(`/sale/${id}/mark-shipped`, {
         user_id: user.id,
@@ -484,6 +709,7 @@ const OfferConversation = () => {
         carrier: carrier || null,
       });
       if (res.data?.sale_status) setSaleStatus(res.data.sale_status);
+      if (res.data?.shipment) setSaleShipment(res.data.shipment);
       toast.success(res.data.message || "Shipment marked as shipped.");
     } catch (err) {
       console.error(err);
@@ -555,13 +781,13 @@ const OfferConversation = () => {
     }
   };
 
-  // تغيّر حقول نموذج الشحن (flow الجديد)
+  // تغيّر حقول نموذج الشحن (Swap)
   const handleShippingInputChange = (e) => {
     const { name, value } = e.target;
     setShippingForm((prev) => ({ ...prev, [name]: value }));
   };
 
-  // 1) طلب quote من Shippo
+  // 1) طلب quote من Shippo – Swap
   const handleGetShippingQuote = async () => {
     if (!user) {
       toast.error("You must be logged in to get a shipping quote.");
@@ -575,7 +801,6 @@ const OfferConversation = () => {
     try {
       setActionLoading(true);
 
-      // Shippo يفرض حد 50 حرفًا في street1
       const street1 = shippingForm.address.slice(0, 50);
 
       const res = await api.post(`/swap/${id}/shipping/quote`, {
@@ -584,7 +809,6 @@ const OfferConversation = () => {
           name: shippingForm.name,
           address_line1: street1,
         },
-        // العنوان الآخر سيُستكمل بقيم افتراضية أو من قاعدة البيانات في backend
         to: {
           name: "Swap partner",
           address_line1: "Partner address",
@@ -611,7 +835,7 @@ const OfferConversation = () => {
     }
   };
 
-  // 2) دفع الشحن عبر Stripe لإنشاء label واحد لهذا المستخدم
+  // 2) دفع الشحن عبر Stripe – Swap
   const handlePayShipping = async () => {
     if (!user) return;
     if (!shippingQuote?.rate) {
@@ -712,6 +936,24 @@ const OfferConversation = () => {
 
   const renderSaleStatusBadge = () => {
     switch (saleStatus) {
+      case "awaiting_shipping_selection":
+        return (
+          <div className="flex flex-col items-center gap-1">
+            <span className="inline-flex items-center text-xs px-2 py-1 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200">
+              Awaiting shipping selection.
+            </span>
+            {isBuyer && (
+              <p className="text-xs text-blue-100/90">
+                Choose a shipping option to continue.
+              </p>
+            )}
+            {isSeller && (
+              <p className="text-xs text-blue-100/90">
+                Waiting for the buyer to choose a shipping option.
+              </p>
+            )}
+          </div>
+        );
       case "awaiting_buyer_payment":
         return (
           <div className="flex flex-col items-center gap-1">
@@ -733,7 +975,9 @@ const OfferConversation = () => {
       case "buyer_paid":
         return (
           <span className="inline-flex items-center text-xs px-2 py-1 rounded-full bg-green-100 text-green-800 dark:bg-green-900/60 dark:text-green-200">
-            Buyer has paid. Waiting for shipment.
+            {isBuyer
+              ? "You have paid. Waiting for the seller to generate a label and ship your gift."
+              : "Buyer has paid. Generate a shipping label and ship the gift."}
           </span>
         );
       case "shipped":
@@ -818,6 +1062,30 @@ const OfferConversation = () => {
 
             <div className="flex flex-col items-start sm:items-end gap-2 text-xs sm:text-sm">
               {isSaleOffer ? renderSaleStatusBadge() : renderSwapStatusBadge()}
+
+              {/* أزرار عناوين الشحن (المشتري + البائع) */}
+              {isSaleOffer && (canEditBuyerAddress || canEditSellerAddress) && (
+                <div className="flex flex-wrap gap-2 mt-1">
+                  {canEditBuyerAddress && (
+                    <button
+                      type="button"
+                      onClick={() => setShowBuyerAddressModal(true)}
+                      className="inline-flex items-center px-3 py-1.5 rounded-lg bg-white/15 hover:bg-white/25 text-[11px] sm:text-xs font-medium border border-white/30"
+                    >
+                      Buyer delivery address
+                    </button>
+                  )}
+                  {canEditSellerAddress && (
+                    <button
+                      type="button"
+                      onClick={() => setShowSellerAddressModal(true)}
+                      className="inline-flex items-center px-3 py-1.5 rounded-lg bg-white/15 hover:bg-white/25 text-[11px] sm:text-xs font-medium border border-white/30"
+                    >
+                      Seller shipping address
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
@@ -909,7 +1177,7 @@ const OfferConversation = () => {
             </div>
           )}
 
-          {/* عرض روابط الشحن للتبادل – كل مستخدم يرى label الخاص به فقط */}
+          {/* روابط شحن التبادل */}
           {!isSaleOffer && (
             <div className="mt-3 bg-white/10 dark:bg-black/10 rounded-xl p-3 sm:p-4">
               <p className="text-xs sm:text-sm font-semibold mb-2 opacity-90">
@@ -961,10 +1229,57 @@ const OfferConversation = () => {
             </div>
           )}
 
+          {/* روابط شحن البيع (label + tracking) */}
+          {isSaleOffer && saleShipment && (
+            <div className="mt-3 bg-white/10 dark:bg-black/10 rounded-xl p-3 sm:p-4">
+              <p className="text-xs sm:text-sm font-semibold mb-2 opacity-90">
+                Shipping label for this sale
+              </p>
+              <div className="text-[11px] sm:text-xs flex flex-wrap gap-2 items-center">
+                {isSeller ? (
+                  <span className="font-semibold">Your label:</span>
+                ) : (
+                  <span className="font-semibold">Seller&apos;s label:</span>
+                )}
+                {saleShipment.label_url ? (
+                  <a
+                    href={saleShipment.label_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="underline"
+                  >
+                    Download label
+                  </a>
+                ) : (
+                  <span>Label URL not available</span>
+                )}
+                {saleShipment.tracking_number && (
+                  <span className="opacity-80">
+                    | Tracking: {saleShipment.tracking_number}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* أزرار الأفعال */}
           <div className="mt-3 flex flex-wrap gap-2 justify-center sm:justify-end text-xs">
             {isSaleOffer ? (
               <>
+                {/* 1) المشتري يختار الشحن أولاً */}
+                {saleStatus === "awaiting_shipping_selection" && isBuyer && (
+                  <button
+                    onClick={handleOpenShippingRates}
+                    disabled={actionLoading}
+                    className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-medium transition disabled:opacity-60"
+                  >
+                    {shippingRatesLoading
+                      ? "Loading shipping..."
+                      : "Choose shipping option"}
+                  </button>
+                )}
+
+                {/* 2) بعد اختيار الشحن → الدفع */}
                 {saleStatus === "awaiting_buyer_payment" && isBuyer && (
                   <button
                     onClick={handlePayForSale}
@@ -975,16 +1290,31 @@ const OfferConversation = () => {
                   </button>
                 )}
 
+                {/* 3) بعد الدفع: البائع يمكنه توليد label + تعليم الشحنة كمرسلة */}
                 {saleStatus === "buyer_paid" && isSeller && (
-                  <button
-                    onClick={handleMarkShipped}
-                    disabled={actionLoading}
-                    className="px-3 py-1.5 rounded-lg bg-indigo-500 hover:bg-indigo-600 text-white font-medium transition disabled:opacity-60"
-                  >
-                    {actionLoading ? "Saving..." : "Mark as Shipped"}
-                  </button>
+                  <div className="flex flex-wrap gap-2 justify-center sm:justify-end w-full">
+                    <button
+                      onClick={handleCreateSaleLabel}
+                      disabled={actionLoading}
+                      className="px-3 py-1.5 rounded-lg bg-indigo-500 hover:bg-indigo-600 text-white font-medium transition disabled:opacity-60"
+                    >
+                      {actionLoading
+                        ? "Processing..."
+                        : saleShipment
+                        ? "Regenerate shipping label"
+                        : "Generate shipping label"}
+                    </button>
+                    <button
+                      onClick={handleMarkShipped}
+                      disabled={actionLoading}
+                      className="px-3 py-1.5 rounded-lg bg-blue-500 hover:bg-blue-600 text-white font-medium transition disabled:opacity-60"
+                    >
+                      {actionLoading ? "Saving..." : "Mark as Shipped"}
+                    </button>
+                  </div>
                 )}
 
+                {/* 4) بعد الشحن: المشتري يؤكد الاستلام أو يفتح مشكلة */}
                 {saleStatus === "shipped" && isBuyer && (
                   <div className="flex flex-wrap gap-2 justify-center sm:justify-end w-full">
                     <button
@@ -1029,7 +1359,6 @@ const OfferConversation = () => {
                   </button>
                 )}
 
-                {/* بعد تفعيل الحماية: كل طرف يحصل على quote ويدفع شحن هديته إذا لم يكن لديه label */}
                 {(swapStatus === "protected_active" ||
                   swapStatus === "shipping_partial") &&
                   !hasMySwapShipment && (
@@ -1051,7 +1380,6 @@ const OfferConversation = () => {
                     </button>
                   )}
 
-                {/* بعد إنشاء الشحنات للطرفين: تظهر أزرار إنهاء/فشل التبادل */}
                 {swapStatus === "shipping_created" && (
                   <>
                     <button
@@ -1259,15 +1587,50 @@ const OfferConversation = () => {
               {/* خطوة 2: عرض Quote + زر الدفع */}
               {shippingQuote?.rate && (
                 <div className="mt-3 border-t border-gray-200 dark:border-gray-700 pt-3 space-y-3">
-                  <div className="bg-blue-50 dark:bg-blue-900/30 rounded-lg p-3 text-xs sm:text-sm text-blue-900 dark:text-blue-100">
-                    <p className="font-semibold mb-1">Estimated shipping cost</p>
+                  <div className="bg-blue-50 dark:bg-blue-900/30 rounded-lg p-3 text-xs sm:text-sm text-blue-900 dark:text-blue-100 space-y-1.5">
+                    <p className="font-semibold">Estimated shipping cost</p>
                     <p>
-                      {shippingQuote.rate.amount} {shippingQuote.rate.currency}{" "}
+                      Total you will pay:{" "}
+                      <span className="font-semibold">
+                        {shippingFinalAmount?.toFixed
+                          ? shippingFinalAmount.toFixed(2)
+                          : shippingQuote.rate.amount}{" "}
+                        {shippingQuote.rate.currency}
+                      </span>{" "}
                       via {shippingQuote.rate.provider}{" "}
                       {shippingQuote.rate.servicelevel_name
                         ? `(${shippingQuote.rate.servicelevel_name})`
                         : ""}
                     </p>
+
+                    {(shippingBaseAmount != null ||
+                      shippingPlatformFee != null) && (
+                      <div className="mt-1.5 space-y-0.5 text-[11px] sm:text-xs opacity-90">
+                        {shippingBaseAmount != null && (
+                          <p>
+                            Base carrier price:{" "}
+                            <span className="font-medium">
+                              {shippingBaseAmount.toFixed
+                                ? shippingBaseAmount.toFixed(2)
+                                : shippingBaseAmount}{" "}
+                              {shippingQuote.rate.currency}
+                            </span>
+                          </p>
+                        )}
+                        {shippingPlatformFee != null && (
+                          <p>
+                            GiftCycle service fee:{" "}
+                            <span className="font-medium">
+                              {shippingPlatformFee.toFixed
+                                ? shippingPlatformFee.toFixed(2)
+                                : shippingPlatformFee}{" "}
+                              {shippingQuote.rate.currency}
+                            </span>
+                          </p>
+                        )}
+                      </div>
+                    )}
+
                     {shippingQuote.rate.est_days && (
                       <p className="opacity-80 mt-1">
                         Estimated {shippingQuote.rate.est_days} day(s)
@@ -1300,6 +1663,118 @@ const OfferConversation = () => {
                 </div>
               )}
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* مودال اختيار سعر الشحن في البيع */}
+      {showShippingRatesModal && isSaleOffer && isBuyer && (
+        <div className="fixed inset-0 bg-black/55 backdrop-blur-sm flex items-center justify-center z-50 px-4">
+          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-5 sm:p-6 relative">
+            <button
+              type="button"
+              className="absolute top-3 right-3 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 rounded-full bg-black/5 p-1"
+              onClick={() => setShowShippingRatesModal(false)}
+            >
+              ✕
+            </button>
+
+            <h3 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-white mb-2">
+              Choose a shipping option
+            </h3>
+            <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 mb-4">
+              Select your preferred carrier and service. The final price will
+              include shipping plus the GiftCycle service fee.
+            </p>
+
+            {shippingRatesLoading ? (
+              <p className="text-sm text-gray-500 dark:text-gray-300">
+                Loading shipping rates...
+              </p>
+            ) : shippingRates.length === 0 ? (
+              <p className="text-sm text-gray-500 dark:text-gray-300">
+                No shipping options available for these addresses.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {shippingRates.map((rate) => (
+                  <button
+                    key={rate.object_id}
+                    type="button"
+                    onClick={() => handleSelectShippingRate(rate)}
+                    disabled={actionLoading}
+                    className="w-full text-left border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-xs sm:text-sm hover:bg-blue-50 dark:hover:bg-blue-900/20 transition"
+                  >
+                    <div className="flex justify-between items-center">
+                      <span className="font-semibold">
+                        {rate.provider}{" "}
+                        {rate.servicelevel_name || rate.service
+                          ? `– ${rate.servicelevel_name || rate.service}`
+                          : ""}
+                      </span>
+                      <span className="font-semibold">
+                        ${Number(rate.amount).toFixed(2)} {rate.currency}
+                      </span>
+                    </div>
+                    {rate.est_days && (
+                      <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">
+                        Estimated {rate.est_days} day(s) delivery
+                      </p>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* مودال عنوان المشتري في عملية البيع */}
+      {showBuyerAddressModal && isSaleOffer && isBuyer && (
+        <div className="fixed inset-0 bg-black/55 backdrop-blur-sm flex items-center justify-center z-50 px-4">
+          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-5 sm:p-6 relative">
+            <button
+              type="button"
+              className="absolute top-3 right-3 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 rounded-full bg-black/5 p-1"
+              onClick={() => setShowBuyerAddressModal(false)}
+            >
+              ✕
+            </button>
+
+            <h3 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-white mb-1">
+              Shipping address for this order
+            </h3>
+            <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 mb-4">
+              This address will be used to generate the shipping label for your
+              gift.
+            </p>
+
+            <BuyerAddressForm offerId={offer.id} addressRole="buyer" />
+          </div>
+        </div>
+      )}
+
+      {/* مودال عنوان البائع في عملية البيع */}
+      {showSellerAddressModal && isSaleOffer && isSeller && (
+        <div className="fixed inset-0 bg-black/55 backdrop-blur-sm flex items-center justify-center z-50 px-4">
+          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-5 sm:p-6 relative">
+            <button
+              type="button"
+              className="absolute top-3 right-3 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 rounded-full bg-black/5 p-1"
+              onClick={() => setShowSellerAddressModal(false)}
+            >
+              ✕
+            </button>
+
+            <h3 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-white mb-1">
+              Your shipping address for this gift
+            </h3>
+            <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 mb-4">
+              This address will be used as the origin address on the shipping
+              label when you ship the gift.
+            </p>
+
+            <BuyerAddressForm offerId={offer.id} addressRole="seller" />
           </div>
         </div>
       )}

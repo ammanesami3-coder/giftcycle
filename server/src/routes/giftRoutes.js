@@ -3,6 +3,7 @@ import pool from "../config/db.js";
 
 const router = express.Router();
 
+// جلب كل الهدايا
 router.get("/", async (req, res) => {
   try {
     const result = await pool.query("SELECT * FROM gifts ORDER BY id DESC");
@@ -12,23 +13,60 @@ router.get("/", async (req, res) => {
   }
 });
 
+// إضافة هدية جديدة (مع وزن الطرد parcel_weight_kg)
 router.post("/", async (req, res) => {
   try {
-    const { title, description, price, category, image_url, owner_id } = req.body;
+    const {
+      title,
+      description,
+      price,
+      category,
+      image_url,
+      owner_id,
+      parcel_weight_kg,
+    } = req.body;
+
+    if (!owner_id) {
+      return res.status(400).json({ error: "owner_id is required" });
+    }
+
+    // نضمن وجود وزن منطقي > 0
+    const weightNumber =
+      parcel_weight_kg !== undefined && parcel_weight_kg !== null
+        ? Number(parcel_weight_kg)
+        : null;
+
+    if (!weightNumber || isNaN(weightNumber) || weightNumber <= 0) {
+      return res.status(400).json({
+        error:
+          "parcel_weight_kg (kg) is required and must be greater than 0 for shipping.",
+      });
+    }
 
     const result = await pool.query(
-      `INSERT INTO gifts (title, description, price, category, image_url, owner_id)
-       VALUES ($1,$2,$3,$4,$5,$6)
+      `INSERT INTO gifts
+        (title, description, price, category, image_url, owner_id, parcel_weight_kg)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING *`,
-      [title, description, price, category, image_url, owner_id]
+      [
+        title,
+        description || null,
+        price,
+        category || null,
+        image_url || null,
+        owner_id,
+        weightNumber,
+      ]
     );
 
     res.json(result.rows[0]);
   } catch (err) {
+    console.error("POST /gifts error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
+// جلب هدايا المستخدم
 router.get("/my/:user_id", async (req, res) => {
   try {
     const { user_id } = req.params;
@@ -47,10 +85,9 @@ router.get("/my/:user_id", async (req, res) => {
 // جلب هدية واحدة حسب ID
 router.get("/:id", async (req, res) => {
   try {
-    const result = await pool.query(
-      "SELECT * FROM gifts WHERE id = $1",
-      [req.params.id]
-    );
+    const result = await pool.query("SELECT * FROM gifts WHERE id = $1", [
+      req.params.id,
+    ]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: "Gift not found" });
@@ -69,10 +106,9 @@ router.delete("/:id", async (req, res) => {
     const giftId = req.params.id;
 
     // تحقق من الهدية
-    const gift = await pool.query(
-      "SELECT * FROM gifts WHERE id = $1",
-      [giftId]
-    );
+    const gift = await pool.query("SELECT * FROM gifts WHERE id = $1", [
+      giftId,
+    ]);
 
     if (gift.rows.length === 0) {
       return res.status(404).json({ error: "Gift not found" });
@@ -81,18 +117,14 @@ router.delete("/:id", async (req, res) => {
     // منع حذف الهدايا المغلقة
     if (gift.rows[0].gift_status === "locked") {
       return res.status(400).json({
-        error: "You cannot delete a locked gift."
+        error: "You cannot delete a locked gift.",
       });
     }
 
     // تنفيذ الحذف
-    await pool.query(
-      "DELETE FROM gifts WHERE id = $1",
-      [giftId]
-    );
+    await pool.query("DELETE FROM gifts WHERE id = $1", [giftId]);
 
     res.json({ success: true, message: "Gift deleted successfully" });
-
   } catch (err) {
     console.error("DELETE /gifts/:id ERROR:", err.message);
     res.status(500).json({ error: "Server error while deleting gift" });
@@ -130,7 +162,6 @@ router.get("/similar/:id", async (req, res) => {
     );
 
     res.json(similar.rows);
-
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
