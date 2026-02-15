@@ -96,7 +96,7 @@ const Navbar = () => {
         to="/"
         className="text-2xl font-bold text-blue-600 dark:text-blue-400 tracking-tight"
       >
-        GiftCycle
+        RideWave
       </Link>
 
       {/* Links */}
@@ -113,7 +113,7 @@ const Navbar = () => {
           to="/add"
           className="text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 transition"
         >
-          Add Gift
+          List Car
         </Link>
 
         {/* Logged-in user links */}
@@ -139,7 +139,7 @@ const Navbar = () => {
                          dark:bg-blue-500 dark:hover:bg-blue-600 
                          text-white px-4 py-2 rounded-lg shadow transition"
             >
-              🎁 <span>My Gifts</span>
+              🎁 <span>My Rentals</span>
             </Link>
 
             <Link

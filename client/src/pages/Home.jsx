@@ -1,206 +1,269 @@
-import React, { useEffect, useState } from "react";
-import api from "../services/api";
-import { motion } from "framer-motion";
-import { Link } from "react-router-dom";
+import React, { useMemo, useState } from "react";
+import { CalendarDays, CarFront, MapPin, ShieldCheck, Star, Users } from "lucide-react";
+
+const cars = [
+  {
+    id: 1,
+    name: "Toyota Corolla",
+    type: "Economy",
+    seats: 5,
+    transmission: "Automatic",
+    fuel: "Petrol",
+    pricePerDay: 38,
+    image:
+      "https://images.unsplash.com/photo-1494976388531-d1058494cdd8?auto=format&fit=crop&w=1400&q=80",
+  },
+  {
+    id: 2,
+    name: "Tesla Model 3",
+    type: "Electric",
+    seats: 5,
+    transmission: "Automatic",
+    fuel: "Electric",
+    pricePerDay: 92,
+    image:
+      "https://images.unsplash.com/photo-1560958089-b8a1929cea89?auto=format&fit=crop&w=1400&q=80",
+  },
+  {
+    id: 3,
+    name: "BMW X5",
+    type: "SUV",
+    seats: 7,
+    transmission: "Automatic",
+    fuel: "Diesel",
+    pricePerDay: 125,
+    image:
+      "https://images.unsplash.com/photo-1550355291-bbee04a92027?auto=format&fit=crop&w=1400&q=80",
+  },
+  {
+    id: 4,
+    name: "Ford Mustang",
+    type: "Sports",
+    seats: 4,
+    transmission: "Automatic",
+    fuel: "Petrol",
+    pricePerDay: 148,
+    image:
+      "https://images.unsplash.com/photo-1549399542-7e3f8b79c341?auto=format&fit=crop&w=1400&q=80",
+  },
+  {
+    id: 5,
+    name: "Mercedes V-Class",
+    type: "Van",
+    seats: 8,
+    transmission: "Automatic",
+    fuel: "Diesel",
+    pricePerDay: 155,
+    image:
+      "https://images.unsplash.com/photo-1616789916185-d2f858dc82bd?auto=format&fit=crop&w=1400&q=80",
+  },
+  {
+    id: 6,
+    name: "Jeep Wrangler",
+    type: "Off-road",
+    seats: 5,
+    transmission: "Automatic",
+    fuel: "Petrol",
+    pricePerDay: 110,
+    image:
+      "https://images.unsplash.com/photo-1503376780353-7e6692767b70?auto=format&fit=crop&w=1400&q=80",
+  },
+];
 
 const Home = () => {
-  const [gifts, setGifts] = useState([]);
-  const [filtered, setFiltered] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [location, setLocation] = useState("");
+  const [carType, setCarType] = useState("All");
+  const [sortBy, setSortBy] = useState("popular");
 
-  const [search, setSearch] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState("All");
-  const [priceFilter, setPriceFilter] = useState("all");
-  const [sortBy, setSortBy] = useState("newest");
-  const [availableOnly, setAvailableOnly] = useState(false);
+  const filteredCars = useMemo(() => {
+    let result = [...cars];
 
-  useEffect(() => {
-    api
-      .get("/gifts")
-      .then((res) => {
-        setGifts(res.data);
-        setFiltered(res.data);
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
-  }, []);
+    if (carType !== "All") {
+      result = result.filter((car) => car.type === carType);
+    }
 
-  const categories = ["All", ...new Set(gifts.map((g) => g.category || "Other"))];
+    if (sortBy === "priceLow") {
+      result.sort((a, b) => a.pricePerDay - b.pricePerDay);
+    } else if (sortBy === "priceHigh") {
+      result.sort((a, b) => b.pricePerDay - a.pricePerDay);
+    }
 
-  useEffect(() => {
-    let data = [...gifts];
-
-    if (availableOnly) data = data.filter((g) => g.gift_status !== "locked");
-
-    if (search.trim() !== "") {
-      data = data.filter(
-        (g) =>
-          g.title.toLowerCase().includes(search.toLowerCase()) ||
-          g.description?.toLowerCase().includes(search.toLowerCase())
+    if (location.trim()) {
+      const query = location.toLowerCase();
+      result = result.filter((car) =>
+        [car.name, car.type, car.fuel].some((field) => field.toLowerCase().includes(query))
       );
     }
 
-    if (categoryFilter !== "All") {
-      data = data.filter((g) => g.category === categoryFilter);
-    }
+    return result;
+  }, [carType, location, sortBy]);
 
-    if (priceFilter === "under20") data = data.filter((g) => g.price <= 20);
-    if (priceFilter === "20to50") data = data.filter((g) => g.price > 20 && g.price <= 50);
-    if (priceFilter === "50plus") data = data.filter((g) => g.price > 50);
-
-    if (sortBy === "newest") {
-      data.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-    } else if (sortBy === "low") {
-      data.sort((a, b) => a.price - b.price);
-    } else if (sortBy === "high") {
-      data.sort((a, b) => b.price - a.price);
-    }
-
-    setFiltered(data);
-  }, [search, categoryFilter, priceFilter, sortBy, availableOnly, gifts]);
-
-  if (loading)
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-gray-100 dark:bg-gray-900">
-        <p className="text-gray-500 dark:text-gray-300 text-lg">Loading gifts...</p>
-      </div>
-    );
+  const types = ["All", ...new Set(cars.map((car) => car.type))];
 
   return (
-    <div className="min-h-screen bg-gray-100 dark:bg-gray-900 dark:text-white transition">
-      {/* Header */}
-      <header className="bg-white dark:bg-gray-800 shadow-sm py-4 mb-6 transition">
-        <h1 className="text-center text-3xl font-semibold text-gray-800 dark:text-white">
-          🎁 GiftCycle Marketplace
-        </h1>
-        <p className="text-center text-gray-500 dark:text-gray-300 mt-1">
-          Exchange, sell, or find your next gift!
-        </p>
-      </header>
-
-      {/* Main Layout */}
-      <div className="max-w-7xl mx-auto px-4 flex gap-6">
-        {/* Sidebar */}
-        <aside className="w-full sm:w-64 bg-white dark:bg-gray-800 rounded-xl shadow p-5 h-fit transition">
-          <h2 className="text-lg font-semibold mb-3">Filters</h2>
-
-          <input
-            type="text"
-            placeholder="Search..."
-            className="w-full border p-2 rounded mb-4 dark:bg-gray-700 dark:border-gray-600"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-
-          {/* Category */}
-          <h3 className="text-sm font-semibold mb-2">Category</h3>
-          <select
-            className="w-full p-2 border rounded mb-4 dark:bg-gray-700 dark:border-gray-600"
-            value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value)}
-          >
-            {categories.map((c) => (
-              <option key={c}>{c}</option>
-            ))}
-          </select>
-
-          {/* Price */}
-          <h3 className="text-sm font-semibold mb-2">Price</h3>
-          <select
-            className="w-full p-2 border rounded mb-4 dark:bg-gray-700 dark:border-gray-600"
-            value={priceFilter}
-            onChange={(e) => setPriceFilter(e.target.value)}
-          >
-            <option value="all">All prices</option>
-            <option value="under20">Under $20</option>
-            <option value="20to50">$20 - $50</option>
-            <option value="50plus">$50 +</option>
-          </select>
-
-          {/* Sorting */}
-          <h3 className="text-sm font-semibold mb-2">Sort by</h3>
-          <select
-            className="w-full p-2 border rounded mb-4 dark:bg-gray-700 dark:border-gray-600"
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value)}
-          >
-            <option value="newest">Newest</option>
-            <option value="low">Price: Low to High</option>
-            <option value="high">Price: High to Low</option>
-          </select>
-
-          {/* Available Only */}
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={availableOnly}
-              onChange={() => setAvailableOnly(!availableOnly)}
-            />
-            <span className="text-sm">Available Only</span>
-          </label>
-        </aside>
-
-        {/* Main Content */}
-        <main className="flex-1">
-          {filtered.length === 0 ? (
-            <p className="text-center text-gray-500 dark:text-gray-300 mt-10">
-              No gifts match your filters.
+    <div className="min-h-screen bg-slate-50 dark:bg-gray-900 dark:text-white">
+      <section className="bg-gradient-to-r from-blue-700 via-indigo-700 to-slate-800 text-white py-16 px-4">
+        <div className="max-w-6xl mx-auto grid gap-10 md:grid-cols-2 items-center">
+          <div>
+            <p className="uppercase tracking-[0.2em] text-blue-200 text-sm mb-2">Drive your trip</p>
+            <h1 className="text-4xl md:text-5xl font-bold leading-tight">Rent your perfect car in minutes</h1>
+            <p className="mt-4 text-blue-100 max-w-xl">
+              Compare top-rated vehicles, transparent prices, and flexible pick-up options for city rides,
+              business travel, and family vacations.
             </p>
-          ) : (
-            <motion.div
-              layout
-              className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6"
+            <div className="mt-8 grid sm:grid-cols-3 gap-4 text-sm">
+              <div className="bg-white/10 rounded-lg p-3">
+                <p className="text-2xl font-bold">20K+</p>
+                <p className="text-blue-100">Bookings</p>
+              </div>
+              <div className="bg-white/10 rounded-lg p-3">
+                <p className="text-2xl font-bold">500+</p>
+                <p className="text-blue-100">Cars available</p>
+              </div>
+              <div className="bg-white/10 rounded-lg p-3">
+                <p className="text-2xl font-bold">4.9/5</p>
+                <p className="text-blue-100">Customer rating</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white text-slate-900 rounded-2xl shadow-2xl p-6">
+            <h2 className="font-semibold text-lg mb-4">Find available cars</h2>
+            <div className="space-y-4">
+              <label className="block">
+                <span className="text-sm text-gray-600">Pick-up location or keyword</span>
+                <div className="mt-1 flex items-center border rounded-lg px-3 py-2">
+                  <MapPin className="w-4 h-4 text-gray-500" />
+                  <input
+                    value={location}
+                    onChange={(e) => setLocation(e.target.value)}
+                    placeholder="e.g. Dubai, SUV, Electric"
+                    className="w-full ml-2 outline-none"
+                  />
+                </div>
+              </label>
+
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block">
+                  <span className="text-sm text-gray-600">Start date</span>
+                  <div className="mt-1 flex items-center border rounded-lg px-3 py-2">
+                    <CalendarDays className="w-4 h-4 text-gray-500" />
+                    <input type="date" className="ml-2 w-full outline-none" />
+                  </div>
+                </label>
+                <label className="block">
+                  <span className="text-sm text-gray-600">End date</span>
+                  <div className="mt-1 flex items-center border rounded-lg px-3 py-2">
+                    <CalendarDays className="w-4 h-4 text-gray-500" />
+                    <input type="date" className="ml-2 w-full outline-none" />
+                  </div>
+                </label>
+              </div>
+
+              <button className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-lg font-medium transition">
+                Search Cars
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="max-w-6xl mx-auto px-4 py-12">
+        <div className="flex flex-wrap items-end justify-between gap-4 mb-6">
+          <div>
+            <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Popular rental vehicles</h2>
+            <p className="text-gray-500 dark:text-gray-300">Choose from trusted economy, luxury, and SUV cars.</p>
+          </div>
+
+          <div className="flex flex-wrap gap-3">
+            <select
+              value={carType}
+              onChange={(e) => setCarType(e.target.value)}
+              className="border rounded-lg px-3 py-2 dark:bg-gray-800"
             >
-              {filtered.map((gift) => (
-                <motion.div
-                  key={gift.id}
-                  layout
-                  initial={{ opacity: 0, scale: 0.9 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ duration: 0.3 }}
-                  whileHover={{ scale: 1.03 }}
-                >
-                  <Link
-                    to={`/gift/${gift.id}`}
-                    className="block bg-white dark:bg-gray-800 rounded-xl shadow-md overflow-hidden 
-                               cursor-pointer relative transition hover:shadow-lg"
-                  >
-                    {gift.gift_status === "locked" && (
-                      <span className="absolute top-2 right-2 bg-red-600 text-white text-xs px-2 py-1 rounded shadow">
-                        LOCKED
-                      </span>
-                    )}
-
-                    <div className="w-full h-56 bg-gray-100 dark:bg-gray-700 flex items-center justify-center overflow-hidden">
-                      <img
-                        src={gift.image_url}
-                        alt={gift.title}
-                        className="object-contain w-full h-full transition-transform duration-300 hover:scale-105"
-                      />
-                    </div>
-
-                    <div className="p-4">
-                      <h3 className="text-lg font-semibold mb-1">{gift.title}</h3>
-                      <p className="text-gray-600 dark:text-gray-300 text-sm mb-2 line-clamp-2">
-                        {gift.description}
-                      </p>
-
-                      <div className="flex items-center justify-between mt-3">
-                        <span className="text-blue-600 dark:text-blue-400 font-semibold">
-                          ${gift.price}
-                        </span>
-                        <span className="text-xs bg-gray-200 dark:bg-gray-700 px-2 py-1 rounded">
-                          {gift.category}
-                        </span>
-                      </div>
-                    </div>
-                  </Link>
-                </motion.div>
+              {types.map((type) => (
+                <option key={type}>{type}</option>
               ))}
-            </motion.div>
-          )}
-        </main>
-      </div>
+            </select>
+
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value)}
+              className="border rounded-lg px-3 py-2 dark:bg-gray-800"
+            >
+              <option value="popular">Most Popular</option>
+              <option value="priceLow">Price: Low to High</option>
+              <option value="priceHigh">Price: High to Low</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+          {filteredCars.map((car) => (
+            <article
+              key={car.id}
+              className="bg-white dark:bg-gray-800 rounded-xl overflow-hidden shadow hover:shadow-lg transition"
+            >
+              <img src={car.image} alt={car.name} className="h-52 w-full object-cover" />
+              <div className="p-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-semibold text-lg">{car.name}</h3>
+                  <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full">{car.type}</span>
+                </div>
+                <div className="mt-3 grid grid-cols-3 text-xs text-gray-500 dark:text-gray-300 gap-2">
+                  <p>{car.seats} seats</p>
+                  <p>{car.transmission}</p>
+                  <p>{car.fuel}</p>
+                </div>
+                <div className="flex items-center justify-between mt-4">
+                  <p>
+                    <span className="text-2xl font-bold text-slate-900 dark:text-white">${car.pricePerDay}</span>
+                    <span className="text-gray-500 text-sm"> / day</span>
+                  </p>
+                  <button className="bg-slate-900 hover:bg-black text-white text-sm px-4 py-2 rounded-lg transition">
+                    Book now
+                  </button>
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="bg-white dark:bg-gray-800 border-y dark:border-gray-700">
+        <div className="max-w-6xl mx-auto px-4 py-12 grid md:grid-cols-3 gap-6">
+          <div className="p-5 rounded-xl bg-slate-50 dark:bg-gray-900">
+            <ShieldCheck className="w-7 h-7 text-green-600 mb-3" />
+            <h3 className="font-semibold">Fully insured rentals</h3>
+            <p className="text-sm mt-2 text-gray-600 dark:text-gray-300">Every booking includes basic insurance and 24/7 roadside support.</p>
+          </div>
+          <div className="p-5 rounded-xl bg-slate-50 dark:bg-gray-900">
+            <CarFront className="w-7 h-7 text-blue-600 mb-3" />
+            <h3 className="font-semibold">Clean, ready-to-drive cars</h3>
+            <p className="text-sm mt-2 text-gray-600 dark:text-gray-300">Our fleet is inspected after each return for your comfort and safety.</p>
+          </div>
+          <div className="p-5 rounded-xl bg-slate-50 dark:bg-gray-900">
+            <Users className="w-7 h-7 text-purple-600 mb-3" />
+            <h3 className="font-semibold">Trusted by travelers</h3>
+            <p className="text-sm mt-2 text-gray-600 dark:text-gray-300">Thousands of verified reviews and repeat customers every month.</p>
+          </div>
+        </div>
+      </section>
+
+      <section className="max-w-6xl mx-auto px-4 py-14 text-center">
+        <div className="inline-flex items-center gap-2 text-amber-500 mb-3">
+          <Star className="w-4 h-4 fill-amber-500" />
+          <Star className="w-4 h-4 fill-amber-500" />
+          <Star className="w-4 h-4 fill-amber-500" />
+          <Star className="w-4 h-4 fill-amber-500" />
+          <Star className="w-4 h-4 fill-amber-500" />
+        </div>
+        <p className="text-lg md:text-xl max-w-3xl mx-auto text-slate-700 dark:text-gray-200">
+          “Best rental experience we had in years. Booking was simple, the car was spotless, and support was
+          very responsive.”
+        </p>
+        <p className="mt-3 text-sm text-gray-500 dark:text-gray-400">— Salma R., frequent business traveler</p>
+      </section>
     </div>
   );
 };
